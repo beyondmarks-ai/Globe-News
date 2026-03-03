@@ -78,7 +78,8 @@ export async function GET(request: Request) {
       FROM 
         \`gdelt-bq.gdeltv2.events\` 
       WHERE 
-        DATEADDED >= CAST(FORMAT_TIMESTAMP('%Y%m%d%H%M%S', TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${hoursBack} HOUR)) AS INT64)
+        _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${hoursBack} HOUR)
+        AND DATEADDED >= CAST(FORMAT_TIMESTAMP('%Y%m%d%H%M%S', TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL ${hoursBack} HOUR)) AS INT64)
         AND ActionGeo_Lat IS NOT NULL 
         AND ActionGeo_Long IS NOT NULL
     `;
