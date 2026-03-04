@@ -51,22 +51,33 @@ export async function GET(request: Request) {
       },
     });
 
-    // 3. Fetch the latest 15 minutes of news
+    // 3. Fetch exact 15-minute window (cost-saving: single slot + minimal partition scan)
+    // GDELT publishes every 15 mins; we query only the most recent *completed* slot
+    // e.g. at 12:17 → fetch 12:00–12:15 only (not "last 15 mins" to avoid overlap & extra scan)
     const query = `
+      WITH slot AS (
+        SELECT 
+          TIMESTAMP_SUB(
+            TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), MINUTE),
+            INTERVAL (MOD(EXTRACT(MINUTE FROM CURRENT_TIMESTAMP()), 15) + 15) MINUTE
+          ) AS window_start
+      )
       SELECT 
-        GLOBALEVENTID,
-        ActionGeo_Lat AS lat, 
-        ActionGeo_Long AS lng, 
-        ActionGeo_FullName AS location_name,
-        GoldsteinScale AS sentiment_score,
-        SOURCEURL AS news_link
-      FROM 
-        \`gdelt-bq.gdeltv2.events\` 
+        e.GLOBALEVENTID,
+        e.ActionGeo_Lat AS lat, 
+        e.ActionGeo_Long AS lng, 
+        e.ActionGeo_FullName AS location_name,
+        e.GoldsteinScale AS sentiment_score,
+        e.SOURCEURL AS news_link
+      FROM \`gdelt-bq.gdeltv2.events\` e
+      CROSS JOIN slot s
       WHERE 
-        _PARTITIONDATE = CURRENT_DATE()
-        AND DATEADDED >= CAST(FORMAT_TIMESTAMP('%Y%m%d%H%M%S', TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 15 MINUTE)) AS INT64)
-        AND ActionGeo_Lat IS NOT NULL 
-        AND ActionGeo_Long IS NOT NULL
+        (e._PARTITIONTIME = DATE(s.window_start)
+         OR e._PARTITIONTIME = DATE(TIMESTAMP_ADD(s.window_start, INTERVAL 15 MINUTE)))
+        AND e.DATEADDED >= CAST(FORMAT_TIMESTAMP('%Y%m%d%H%M%S', s.window_start) AS INT64)
+        AND e.DATEADDED < CAST(FORMAT_TIMESTAMP('%Y%m%d%H%M%S', TIMESTAMP_ADD(s.window_start, INTERVAL 15 MINUTE)) AS INT64)
+        AND e.ActionGeo_Lat IS NOT NULL 
+        AND e.ActionGeo_Long IS NOT NULL
       LIMIT 1000;
     `;
 
